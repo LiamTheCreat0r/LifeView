@@ -339,7 +339,9 @@ let mut kernel_count_per_channel = vec![0; num_channels];
             }
         }
 
+        let current_delta = self.rule.delta;
         self.rule = shape.optimal_rule.clone();
+        self.rule.delta = current_delta;
         if self.kernels_need_rebuild() {
             self.rebuild_all_kernels();
         }

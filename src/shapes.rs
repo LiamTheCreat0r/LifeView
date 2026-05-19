@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -12,6 +13,8 @@ use crate::rule::Rule;
 #[derive(Clone, Debug)]
 pub struct Shape {
     pub name: String,
+    pub genus: String,
+    pub genus_display: String,
     pub optimal_rule: Rule,
     pub cells_state: Vec<f32>,
     pub cells_pos: Vec<IVec2>,
@@ -25,6 +28,43 @@ struct ShapeJson {
     channels: Vec<Vec<Vec<f32>>>,
 }
 
+const GENUS_DISPLAY_NAMES: &[(&str, &str)] = &[
+    ("Orbium", "Orbium (球形目)"),
+    ("Gyrorbium", "Gyrorbium (旋球目)"),
+    ("Vagorbium", "Vagorbium (游球目)"),
+    ("Synorbium", "Synorbium (联球目)"),
+    ("Trisynorbium", "Trisynorbium (三联球目)"),
+    ("Parorbium", "Parorbium (并球目)"),
+    ("Triparorbium", "Triparorbium (三并球目)"),
+    ("Scutium", "Scutium (盾形目)"),
+    ("Discutium", "Discutium (盘盾目)"),
+    ("Triscutium", "Triscutium (三盾目)"),
+    ("Hydrogeminium", "Hydrogeminium (水双生目)"),
+    ("Tessellatium", "Tessellatium (镶嵌目)"),
+    ("Flos", "Flos (花形目)"),
+    ("Asteria", "Asteria (星形目)"),
+    ("Spirillum", "Spirillum (螺旋目)"),
+    ("Angula", "Angula (角形目)"),
+    ("Caterpillar", "Caterpillar (毛虫目)"),
+    ("Platyhelminthes", "Platyhelminthes (扁虫目)"),
+    ("Lacuna", "Lacuna (环空目)"),
+    ("Medusa", "Medusa (水母目)"),
+    ("Anemone", "Anemone (海葵目)"),
+];
+
+fn get_genus_display(genus: &str) -> &str {
+    for (g, display) in GENUS_DISPLAY_NAMES {
+        if *g == genus {
+            return display;
+        }
+    }
+    genus
+}
+
+fn extract_genus(name: &str) -> String {
+    name.split_whitespace().next().unwrap_or(name).to_string()
+}
+
 impl Shape {
     pub fn new(
         name: String,
@@ -33,8 +73,12 @@ impl Shape {
         cells_pos: Vec<IVec2>,
         cells_channel: Vec<usize>,
     ) -> Self {
+        let genus = extract_genus(&name);
+        let genus_display = get_genus_display(&genus).to_string();
         Self {
             name,
+            genus,
+            genus_display,
             optimal_rule,
             cells_state,
             cells_pos,
@@ -130,6 +174,23 @@ pub struct Shapes(pub Vec<Shape>);
 impl Shapes {
     pub fn add(&mut self, shape: Shape) {
         self.0.push(shape);
+    }
+
+    pub fn by_genus(&self) -> BTreeMap<String, Vec<&Shape>> {
+        let mut map: BTreeMap<String, Vec<&Shape>> = BTreeMap::new();
+        for shape in &self.0 {
+            map.entry(shape.genus.clone())
+                .or_default()
+                .push(shape);
+        }
+        map
+    }
+
+    pub fn genus_display(&self, genus: &str) -> String {
+        self.0.iter()
+            .find(|s| s.genus == genus)
+            .map(|s| s.genus_display.clone())
+            .unwrap_or_else(|| genus.to_string())
     }
 
     pub fn load_from_dir(dir_path: impl AsRef<Path>) -> Self {

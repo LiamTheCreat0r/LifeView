@@ -6,7 +6,7 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use crate::grid::GenerationType;
 use crate::grid::Grid;
 use crate::grid_coloration::ColorGradient;
-use crate::rule::{KernelDef, Rule};
+use crate::rule::KernelDef;
 use crate::shapes::Shapes;
 
 pub const PANEL_WIDTH: f32 = 280.;
@@ -151,26 +151,57 @@ pub fn ui(
                 ui.label(egui::RichText::new("Shapes").heading());
                 ui.add_space(4.0);
 
-                let shape_names: Vec<(String, Rule)> = shapes
-                    .0
-                    .iter()
-                    .map(|s| (s.name.clone(), s.optimal_rule.clone()))
-                    .collect();
+                let mut search: String = ui.data_mut(|d| {
+                    d.get_persisted(egui::Id::new("shape_search")).unwrap_or_default()
+                });
+                if ui.text_edit_singleline(&mut search).changed() {
+                    ui.data_mut(|d| d.insert_persisted(egui::Id::new("shape_search"), search.clone()));
+                }
 
-                egui::Grid::new("shapes_grid")
-                    .num_columns(2)
-                    .spacing([6.0, 6.0])
-                    .show(ui, |ui| {
-                        for (i, (name, _rule)) in shape_names.iter().enumerate() {
-                            if ui.button(name).clicked() {
-                                grid.clear();
-                                grid.spawn_shape(name.clone(), shapes.0.clone());
-                            }
-                            if i % 2 == 1 {
-                                ui.end_row();
-                            }
-                        }
-                    });
+                ui.separator();
+
+                let genus_map = shapes.by_genus();
+                for (genus, genus_shapes) in &genus_map {
+                    let display = shapes.genus_display(genus);
+
+                    let filtered: Vec<_> = if search.is_empty() {
+                        genus_shapes.iter().copied().collect()
+                    } else {
+                        genus_shapes.iter()
+                            .filter(|s| s.name.to_lowercase().contains(&search.to_lowercase()))
+                            .copied()
+                            .collect()
+                    };
+
+                    if filtered.is_empty() {
+                        continue;
+                    }
+
+                    let header_label = if search.is_empty() {
+                        format!("{} ({})", display, filtered.len())
+                    } else {
+                        format!("{} ({}/{})", display, filtered.len(), genus_shapes.len())
+                    };
+
+                    egui::CollapsingHeader::new(&header_label)
+                        .default_open(genus == "Orbium")
+                        .show(ui, |ui| {
+                            egui::Grid::new(format!("shapes_{}", genus))
+                                .num_columns(2)
+                                .spacing([6.0, 6.0])
+                                .show(ui, |ui| {
+                                    for (i, shape) in filtered.iter().enumerate() {
+                                        if ui.button(&shape.name).clicked() {
+                                            grid.clear();
+                                            grid.spawn_shape(shape.name.clone(), shapes.0.clone());
+                                        }
+                                        if i % 2 == 1 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+                }
 
                 ui.separator();
 
