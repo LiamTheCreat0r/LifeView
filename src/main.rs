@@ -5,8 +5,8 @@ use crate::grid::update_generation;
 use crate::instancing::CellMaterialPlugin;
 use crate::instancing::update_instance_data;
 use crate::interface::{UiPlugin, PANEL_WIDTH, TOPBAR_HEIGHT};
-use crate::shapes::add_shapes;
 use crate::shapes::insert_shapes;
+use crate::shapes::load_shapes;
 use bevy_egui::EguiPlugin;
 
 mod grid;
@@ -36,7 +36,7 @@ fn main() {
         .add_plugins(CellMaterialPlugin)
         .add_plugins(UiPlugin)
         .add_systems(Startup, insert_shapes)
-        .add_systems(Startup, add_shapes.after(insert_shapes))
+        .add_systems(Startup, load_shapes.after(insert_shapes))
         .add_systems(FixedUpdate, update_generation)
         .add_systems(
             FixedUpdate,

@@ -1,6 +1,7 @@
 use bevy::math::ops::exp;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rule {
     pub state_type: StateType,
     pub delta: f32,
@@ -72,7 +73,7 @@ impl Default for Rule {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KernelDef {
     pub mu: f32,
     pub sigma: f32,
@@ -145,7 +146,8 @@ pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum StateType {
     CONTINUOUS,
     DISCRETE,

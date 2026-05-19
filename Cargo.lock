@@ -13,6 +13,8 @@ dependencies = [
  "bytemuck",
  "rand",
  "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
