@@ -4,7 +4,7 @@ use bevy_embedded_assets::{EmbeddedAssetPlugin, PluginMode};
 use crate::grid::update_generation;
 use crate::instancing::CellMaterialPlugin;
 use crate::instancing::update_instance_data;
-use crate::interface::{UiPlugin, PANEL_WIDTH, TOPBAR_HEIGHT};
+use crate::interface::{PANEL_WIDTH, TOPBAR_HEIGHT, UiPlugin};
 use crate::shapes::insert_shapes;
 use crate::shapes::load_shapes;
 use bevy_egui::EguiPlugin;
@@ -20,7 +20,9 @@ const DRAW_STRENGTH: f32 = 0.05;
 
 fn main() {
     App::new()
-        .add_plugins(EmbeddedAssetPlugin { mode: PluginMode::ReplaceDefault })
+        .add_plugins(EmbeddedAssetPlugin {
+            mode: PluginMode::ReplaceDefault,
+        })
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 fit_canvas_to_parent: true,

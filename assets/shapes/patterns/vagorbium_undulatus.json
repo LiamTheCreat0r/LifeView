@@ -19,7 +19,8 @@
         "use_target": false,
         "sum_mode": false,
         "polynomial": true,
-        "alpha": 4.0
+        "alpha": 4.0,
+        "kernel_kind": "quad4"
       }
     ]
   },

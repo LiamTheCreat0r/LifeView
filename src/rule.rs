@@ -7,6 +7,35 @@ pub struct Rule {
     pub delta: f32,
     pub kernels: Vec<KernelDef>,
     pub num_channels: usize,
+    #[serde(default)]
+    pub mode: RuleMode,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelKind {
+    Bump4,
+    Quad4,
+}
+
+impl Default for KernelKind {
+    fn default() -> Self {
+        Self::Bump4
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum RuleMode {
+    #[serde(rename = "sum")]
+    Sum,
+    #[serde(rename = "multiply")]
+    Multiply,
+}
+
+impl Default for RuleMode {
+    fn default() -> Self {
+        Self::Sum
+    }
 }
 
 impl Rule {
@@ -16,6 +45,7 @@ impl Rule {
             delta: 0.1,
             kernels: vec![KernelDef::default_single(mu, sigma, radius)],
             num_channels: 1,
+            mode: RuleMode::Sum,
         }
     }
 
@@ -25,6 +55,7 @@ impl Rule {
             delta: 0.1,
             kernels,
             num_channels,
+            mode: RuleMode::Sum,
         }
     }
 
@@ -84,13 +115,14 @@ pub struct KernelDef {
     pub c0: usize,
     pub c1: usize,
     pub use_target: bool,
-    pub sum_mode: bool,
     pub polynomial: bool,
     pub alpha: f32,
+    #[serde(default)]
+    pub kernel_kind: KernelKind,
 }
 
 impl KernelDef {
-pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
+    pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
         Self {
             mu,
             sigma,
@@ -101,9 +133,9 @@ pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
             c0: 0,
             c1: 0,
             use_target: false,
-            sum_mode: false,
             polynomial: false,
             alpha: 4.0,
+            kernel_kind: KernelKind::default(),
         }
     }
 
@@ -116,7 +148,6 @@ pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
         peaks: Vec<f32>,
         c0: usize,
         c1: usize,
-        sum_mode: bool,
         polynomial: bool,
     ) -> Self {
         Self {
@@ -129,10 +160,15 @@ pub fn default_single(mu: f32, sigma: f32, radius: i32) -> Self {
             c0,
             c1,
             use_target: false,
-            sum_mode,
             polynomial,
             alpha: 4.0,
+            kernel_kind: KernelKind::default(),
         }
+    }
+
+    pub fn with_kernel_kind(mut self, kernel_kind: KernelKind) -> Self {
+        self.kernel_kind = kernel_kind;
+        self
     }
 
     pub fn with_alpha(mut self, alpha: f32) -> Self {

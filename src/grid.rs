@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::grid_coloration::GridColoration;
-use crate::rule::{KernelDef, Rule};
+use crate::rule::{KernelDef, KernelKind, Rule, RuleMode};
 use crate::shapes::Shape;
 
 use rand::Rng;
@@ -34,6 +34,7 @@ pub struct KernelSignature {
     pub base_radius: i32,
     pub relative_radius: f32,
     pub peaks: Vec<f32>,
+    pub kernel_kind: KernelKind,
 }
 
 impl Grid {
@@ -74,6 +75,7 @@ impl Grid {
                 base_radius: k.base_radius,
                 relative_radius: k.relative_radius,
                 peaks: k.peaks.clone(),
+                kernel_kind: k.kernel_kind.clone(),
             };
             if current_sig != *sig {
                 return true;
@@ -91,6 +93,7 @@ impl Grid {
                 base_radius: kernel_def.base_radius,
                 relative_radius: kernel_def.relative_radius,
                 peaks: kernel_def.peaks.clone(),
+                kernel_kind: kernel_def.kernel_kind.clone(),
             });
             self.kernel_caches.push(cache);
         }
@@ -111,7 +114,7 @@ impl Grid {
                 }
 
                 let t = d / r as f32;
-                let w = Self::kernel_weight(t, &kernel_def.peaks);
+                let w = Self::kernel_weight(t, &kernel_def.peaks, &kernel_def.kernel_kind);
                 weights.push((IVec2::new(x, y), w));
                 sum += w;
             }
@@ -120,17 +123,33 @@ impl Grid {
         KernelCache { weights, sum }
     }
 
-    fn kernel_weight(t: f32, peaks: &[f32]) -> f32 {
-        if peaks.len() == 1 {
-            let bell_t = (t - 0.5) / 0.15;
-            return (-bell_t.powi(2) / 2.0).exp();
-        }
+    fn kernel_weight(t: f32, peaks: &[f32], kernel_kind: &KernelKind) -> f32 {
+        match kernel_kind {
+            KernelKind::Bump4 => {
+                if peaks.len() == 1 {
+                    let bell_t = (t - 0.5) / 0.15;
+                    return (-bell_t.powi(2) / 2.0).exp();
+                }
 
-        let idx = (t * peaks.len() as f32).floor() as usize;
-        let idx = idx.min(peaks.len() - 1);
-        let frac = t * peaks.len() as f32 - idx as f32;
-        let bell_frac = (frac - 0.5) / 0.15;
-        peaks[idx] * (-bell_frac.powi(2) / 2.0).exp()
+                let idx = (t * peaks.len() as f32).floor() as usize;
+                let idx = idx.min(peaks.len() - 1);
+                let frac = t * peaks.len() as f32 - idx as f32;
+                let bell_frac = (frac - 0.5) / 0.15;
+                peaks[idx] * (-bell_frac.powi(2) / 2.0).exp()
+            }
+            KernelKind::Quad4 => {
+                if peaks.len() == 1 {
+                    let k = 4.0 * t * (1.0 - t);
+                    return k.powi(4);
+                }
+
+                let idx = (t * peaks.len() as f32).floor() as usize;
+                let idx = idx.min(peaks.len() - 1);
+                let frac = t * peaks.len() as f32 - idx as f32;
+                let k = 4.0 * frac * (1.0 - frac);
+                peaks[idx] * k.powi(4)
+            }
+        }
     }
 
     pub fn init(&mut self) {
@@ -263,19 +282,13 @@ impl Grid {
             self.next_cell_data.resize(expected_size, 0.0);
         }
 
-let mut kernel_count_per_channel = vec![0; num_channels];
-            for kernel_def in &self.rule.kernels {
-                if kernel_def.c1 < num_channels {
-                    kernel_count_per_channel[kernel_def.c1] += 1;
-                }
-            }
-
         let cell_data = &self.cell_data;
         let rule = &self.rule;
         let kernel_caches = &self.kernel_caches;
         let width = self.width;
         let height = self.height;
-        let count_per_ch = &kernel_count_per_channel;
+
+        let sum_mode = rule.mode == RuleMode::Sum;
 
         self.next_cell_data
             .par_chunks_mut(num_channels)
@@ -283,11 +296,8 @@ let mut kernel_count_per_channel = vec![0; num_channels];
             .for_each(|(idx, chunk)| {
                 let pos = IVec2::new(idx as i32 % width as i32, idx as i32 / width as i32);
                 for c in 0..num_channels {
-                    let count_c1 = count_per_ch[c].max(1);
-
-                    let mut multiply_total = 0.0;
-                    let mut sum_total = 0.0;
-                    let mut sum_count = 0;
+                    let mut total = 0.0;
+                    let mut count = 0;
 
                     for (ki, kernel_def) in rule.kernels.iter().enumerate() {
                         if kernel_def.c1 != c {
@@ -305,21 +315,24 @@ let mut kernel_count_per_channel = vec![0; num_channels];
                             rule.growth(u, ki)
                         };
 
-                        if kernel_def.sum_mode {
-                            sum_total += kernel_def.height * g;
-                            sum_count += 1;
+                        let value = kernel_def.height * g;
+                        if sum_mode {
+                            total += value;
+                        } else if count == 0 {
+                            total = value;
                         } else {
-                            multiply_total += kernel_def.height * g;
+                            total *= value;
                         }
+                        count += 1;
                     }
 
-                    let avg_growth = if sum_count > 0 {
-                        sum_total / sum_count as f32
+                    let growth = if count > 0 {
+                        if sum_mode { total / count as f32 } else { total }
                     } else {
-                        multiply_total / count_c1 as f32
+                        0.0
                     };
                     let current_val = cell_data[idx * num_channels + c];
-                    let new_value = current_val + avg_growth * rule.delta;
+                    let new_value = current_val + growth * rule.delta;
                     chunk[c] = new_value.clamp(0.0, 1.0);
                 }
             });
@@ -339,9 +352,7 @@ let mut kernel_count_per_channel = vec![0; num_channels];
             }
         }
 
-        let current_delta = self.rule.delta;
         self.rule = shape.optimal_rule.clone();
-        self.rule.delta = current_delta;
         if self.kernels_need_rebuild() {
             self.rebuild_all_kernels();
         }
@@ -361,7 +372,8 @@ let mut kernel_count_per_channel = vec![0; num_channels];
 
         let grid_center: IVec2 = IVec2::new(self.width as i32 / 2, self.height as i32 / 2);
         for i in 0..shape.cells_state.len() {
-            let idx: usize = self.vector_to_idx(grid_center + shape.cells_pos[i]) as usize;
+            let pos = self.wrap_pos(grid_center + shape.cells_pos[i]);
+            let idx: usize = self.vector_to_idx(pos) as usize;
             if idx < total_cells {
                 let ch = if !shape.cells_channel.is_empty() {
                     shape.cells_channel[i]

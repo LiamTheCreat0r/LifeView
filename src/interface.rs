@@ -125,6 +125,13 @@ pub fn ui(
 
                 ui.add(egui::Slider::new(&mut grid.rule.delta, 0.0..=0.5).text("Δt"));
 
+                egui::ComboBox::from_label("Mode")
+                    .selected_text(format!("{:?}", grid.rule.mode))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Sum, "Sum");
+                        ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Multiply, "Multiply");
+                    });
+
                 ui.separator();
 
                 // ── Display ────────────────────────────────────────
@@ -255,7 +262,6 @@ pub fn ui(
                             );
 
                             ui.checkbox(&mut kernel.use_target, "Asymptotic (target mode)");
-                            ui.checkbox(&mut kernel.sum_mode, "Sum mode (height multiply)");
                             ui.checkbox(&mut kernel.polynomial, "Polynomial growth");
 
                             if ui.small_button("Remove").clicked() {
@@ -329,9 +335,9 @@ fn add_default_kernel(grid: &mut Grid) {
             c0: 0,
             c1: 0,
             use_target: false,
-            sum_mode: k.sum_mode,
             polynomial: k.polynomial,
             alpha: k.alpha,
+            kernel_kind: k.kernel_kind.clone(),
         }
     } else {
         KernelDef::default_single(0.15, 0.015, 13)
