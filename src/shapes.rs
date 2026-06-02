@@ -12,6 +12,7 @@ use crate::rule::Rule;
 
 #[derive(Clone, Debug)]
 pub struct Shape {
+    pub category: String,
     pub name: String,
     pub genus: String,
     pub genus_display: String,
@@ -76,6 +77,7 @@ impl Shape {
         let genus = extract_genus(&name);
         let genus_display = get_genus_display(&genus).to_string();
         Self {
+            category: String::new(),
             name,
             genus,
             genus_display,
@@ -186,6 +188,18 @@ impl Shapes {
         map
     }
 
+    pub fn by_category_and_genus(&self) -> BTreeMap<String, BTreeMap<String, Vec<&Shape>>> {
+        let mut map: BTreeMap<String, BTreeMap<String, Vec<&Shape>>> = BTreeMap::new();
+        for shape in &self.0 {
+            map.entry(shape.category.clone())
+                .or_default()
+                .entry(shape.genus.clone())
+                .or_default()
+                .push(shape);
+        }
+        map
+    }
+
     pub fn genus_display(&self, genus: &str) -> String {
         self.0.iter()
             .find(|s| s.genus == genus)
@@ -193,7 +207,7 @@ impl Shapes {
             .unwrap_or_else(|| genus.to_string())
     }
 
-    pub fn load_from_dir(dir_path: impl AsRef<Path>) -> Self {
+    pub fn load_from_dir(dir_path: impl AsRef<Path>, category: &str) -> Self {
         let mut shapes = Shapes::default();
         let dir = dir_path.as_ref();
 
@@ -233,13 +247,51 @@ impl Shapes {
             };
 
             match Shape::from_json(&content) {
-                Ok(shape) => {
-                    eprintln!("Loaded shape: {}", shape.name);
+                Ok(mut shape) => {
+                    shape.category = category.to_string();
+                    eprintln!("Loaded shape: {} (category: {})", shape.name, category);
                     shapes.add(shape);
                 }
                 Err(e) => {
                     eprintln!("Failed to parse {:?}: {}", path, e);
                 }
+            }
+        }
+
+        shapes
+    }
+
+    pub fn load_all(base_path: impl AsRef<Path>) -> Self {
+        let mut shapes = Shapes::default();
+        let base = base_path.as_ref();
+
+        let entries = match fs::read_dir(base) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Failed to read base shapes directory: {}", e);
+                return shapes;
+            }
+        };
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("Failed to read directory entry: {}", e);
+                    continue;
+                }
+            };
+
+            let path = entry.path();
+            if path.is_dir() {
+                let category = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                eprintln!("Loading shapes from category: {}", category);
+                let dir_shapes = Self::load_from_dir(&path, &category);
+                shapes.0.extend(dir_shapes.0);
             }
         }
 
@@ -252,6 +304,6 @@ pub fn insert_shapes(mut commands: Commands) {
 }
 
 pub fn load_shapes(mut shapes: ResMut<Shapes>) {
-    let loaded = Shapes::load_from_dir("assets/shapes/patterns");
+    let loaded = Shapes::load_all("assets/shapes");
     shapes.0 = loaded.0;
 }
