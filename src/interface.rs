@@ -6,7 +6,7 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use crate::grid::GenerationType;
 use crate::grid::Grid;
 use crate::grid_coloration::ColorGradient;
-use crate::rule::KernelDef;
+use crate::rule::{KernelDef, Transition, StateType};
 use crate::shapes::Shapes;
 
 pub const PANEL_WIDTH: f32 = 280.;
@@ -104,16 +104,20 @@ pub fn ui(
 
                 ui.separator();
 
-                // ── Channels ──────────────────────────────────────
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new("Channels").heading());
-                ui.add_space(4.0);
+                let is_conway = matches!(grid.rule.transition, Transition::BirthSurvive { .. });
 
-                let mut num_channels = grid.rule.num_channels as i32;
-                ui.add(egui::Slider::new(&mut num_channels, 1..=3).text("Count"));
-                let num_channels = num_channels as usize;
-                if num_channels != grid.rule.num_channels {
-                    change_channel_count(&mut grid, num_channels);
+                if !is_conway {
+                    // ── Channels ──────────────────────────────────────
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("Channels").heading());
+                    ui.add_space(4.0);
+
+                    let mut num_channels = grid.rule.num_channels as i32;
+                    ui.add(egui::Slider::new(&mut num_channels, 1..=3).text("Count"));
+                    let num_channels = num_channels as usize;
+                    if num_channels != grid.rule.num_channels {
+                        change_channel_count(&mut grid, num_channels);
+                    }
                 }
 
                 ui.separator();
@@ -123,14 +127,68 @@ pub fn ui(
                 ui.label(egui::RichText::new("Global Rules").heading());
                 ui.add_space(4.0);
 
-                ui.add(egui::Slider::new(&mut grid.rule.delta, 0.0..=0.5).text("Δt"));
-
-                egui::ComboBox::from_label("Mode")
-                    .selected_text(format!("{:?}", grid.rule.mode))
+                egui::ComboBox::from_label("Transition")
+                    .selected_text(if is_conway { "Conway" } else { "Lenia Growth" })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Sum, "Sum");
-                        ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Multiply, "Multiply");
+                        if ui.selectable_value(&mut (), (), "Lenia Growth").clicked() && is_conway {
+                            grid.rule.transition = Transition::LeniaGrowth;
+                            grid.rule.kernels = vec![KernelDef::default_single(0.15, 0.015, 13)];
+                            grid.rebuild_all_kernels();
+                            grid.clear();
+                        }
+                        if ui.selectable_value(&mut (), (), "Conway").clicked() && !is_conway {
+                            grid.rule.transition = Transition::conway();
+                            grid.rule.num_channels = 1;
+                            grid.rule.state_type = StateType::DISCRETE;
+                            grid.rule.num_discrete_states = 2;
+                            grid.rule.kernels.clear();
+                            grid.kernel_caches.clear();
+                            grid.prev_kernel_sig.clear();
+                            let total_cells = grid.width * grid.height;
+                            grid.cell_data.resize(total_cells, 0.0);
+                            grid.next_cell_data.resize(total_cells, 0.0);
+                            grid.clear();
+                        }
                     });
+
+                if is_conway {
+                    if let Transition::BirthSurvive { ref mut birth, ref mut survive } = grid.rule.transition {
+                        ui.label("Birth:");
+                        birth_checkboxes(ui, birth);
+
+                        ui.label("Survive:");
+                        birth_checkboxes(ui, survive);
+                    }
+                } else {
+                    egui::ComboBox::from_label("State")
+                        .selected_text(match grid.rule.state_type {
+                            StateType::CONTINUOUS => "Continuous",
+                            StateType::DISCRETE => "Discrete",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut grid.rule.state_type, StateType::CONTINUOUS, "Continuous");
+                            ui.selectable_value(&mut grid.rule.state_type, StateType::DISCRETE, "Discrete");
+                        });
+
+                    if grid.rule.state_type == StateType::DISCRETE && grid.rule.num_discrete_states < 2 {
+                        grid.rule.num_discrete_states = 2;
+                    }
+
+                    ui.add(egui::Slider::new(&mut grid.rule.delta, 0.0..=0.5).text("Δt"));
+
+                    egui::ComboBox::from_label("Mode")
+                        .selected_text(format!("{:?}", grid.rule.mode))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Sum, "Sum");
+                            ui.selectable_value(&mut grid.rule.mode, crate::rule::RuleMode::Multiply, "Multiply");
+                        });
+                }
+
+                if grid.rule.state_type == StateType::DISCRETE {
+                    let mut n = grid.rule.num_discrete_states as i32;
+                    ui.add(egui::Slider::new(&mut n, 2..=256).text("States"));
+                    grid.rule.num_discrete_states = n as usize;
+                }
 
                 ui.separator();
 
@@ -218,75 +276,77 @@ pub fn ui(
 
                 ui.separator();
 
-                // ── Kernels ───────────────────────────────────────
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Kernels").heading());
-                    ui.add_space(8.0);
-                    if ui.button("+ Add").clicked() {
-                        add_default_kernel(&mut grid);
+                if !is_conway {
+                    // ── Kernels ───────────────────────────────────────
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Kernels").heading());
+                        ui.add_space(8.0);
+                        if ui.button("+ Add").clicked() {
+                            add_default_kernel(&mut grid);
+                        }
+                    });
+                    ui.add_space(4.0);
+
+                    let num_kernels = grid.rule.kernels.len();
+                    let mut to_remove: Option<usize> = None;
+                    let mut kernels_changed = false;
+
+                    for ki in 0..num_kernels {
+                        let kernel = &mut grid.rule.kernels[ki];
+                        let header_label = if num_kernels == 1 {
+                            format!("Kernel")
+                        } else {
+                            format!("Kernel #{}", ki + 1)
+                        };
+
+                        egui::CollapsingHeader::new(&header_label)
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                ui.label(format!("c{} → c{}", kernel.c0, kernel.c1));
+
+                                ui.add(
+                                    egui::Slider::new(&mut kernel.mu, 0.0..=1.0)
+                                        .text("μ micro"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut kernel.sigma, 0.001..=0.2)
+                                        .text("σ sigma"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut kernel.base_radius, 1..=20)
+                                        .text("Radius"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut kernel.relative_radius, 0.1..=1.5)
+                                        .text("ρ rel. radius"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut kernel.height, 0.0..=1.0)
+                                        .text("η height"),
+                                );
+
+                                ui.checkbox(&mut kernel.use_target, "Asymptotic (target mode)");
+                                ui.checkbox(&mut kernel.polynomial, "Polynomial growth");
+
+                                if ui.small_button("Remove").clicked() {
+                                    to_remove = Some(ki);
+                                }
+
+                                kernels_changed = true;
+                            });
                     }
-                });
-                ui.add_space(4.0);
 
-                let num_kernels = grid.rule.kernels.len();
-                let mut to_remove: Option<usize> = None;
-                let mut kernels_changed = false;
-
-                for ki in 0..num_kernels {
-                    let kernel = &mut grid.rule.kernels[ki];
-                    let header_label = if num_kernels == 1 {
-                        format!("Kernel")
-                    } else {
-                        format!("Kernel #{}", ki + 1)
-                    };
-
-                    egui::CollapsingHeader::new(&header_label)
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            ui.label(format!("c{} → c{}", kernel.c0, kernel.c1));
-
-                            ui.add(
-                                egui::Slider::new(&mut kernel.mu, 0.0..=1.0)
-                                    .text("μ micro"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut kernel.sigma, 0.001..=0.2)
-                                    .text("σ sigma"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut kernel.base_radius, 1..=20)
-                                    .text("Radius"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut kernel.relative_radius, 0.1..=1.5)
-                                    .text("ρ rel. radius"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut kernel.height, 0.0..=1.0)
-                                    .text("η height"),
-                            );
-
-                            ui.checkbox(&mut kernel.use_target, "Asymptotic (target mode)");
-                            ui.checkbox(&mut kernel.polynomial, "Polynomial growth");
-
-                            if ui.small_button("Remove").clicked() {
-                                to_remove = Some(ki);
-                            }
-
+                    if let Some(ki) = to_remove {
+                        if grid.rule.kernels.len() > 1 {
+                            grid.rule.kernels.remove(ki);
                             kernels_changed = true;
-                        });
-                }
-
-                if let Some(ki) = to_remove {
-                    if grid.rule.kernels.len() > 1 {
-                        grid.rule.kernels.remove(ki);
-                        kernels_changed = true;
+                        }
                     }
-                }
 
-                if kernels_changed {
-                    grid.rebuild_all_kernels();
+                    if kernels_changed {
+                        grid.rebuild_all_kernels();
+                    }
                 }
             });
         });
@@ -351,4 +411,23 @@ fn add_default_kernel(grid: &mut Grid) {
 
     grid.rule.kernels.push(new_kernel);
     grid.rebuild_all_kernels();
+}
+
+fn birth_checkboxes(ui: &mut egui::Ui, counts: &mut Vec<u8>) {
+    for row in 0..3 {
+        ui.horizontal(|ui| {
+            for col in 0..3 {
+                let n = row * 3 + col;
+                let checked = counts.contains(&n);
+                if ui.selectable_label(checked, format!("{n}")).clicked() {
+                    if checked {
+                        counts.retain(|&x| x != n);
+                    } else {
+                        counts.push(n);
+                        counts.sort();
+                    }
+                }
+            }
+        });
+    }
 }

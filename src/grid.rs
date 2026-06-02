@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::grid_coloration::GridColoration;
-use crate::rule::{KernelDef, KernelKind, Rule, RuleMode};
+use crate::rule::{KernelDef, KernelKind, Rule, RuleMode, StateType, Transition};
 use crate::shapes::Shape;
 
 use rand::Rng;
@@ -271,16 +271,34 @@ impl Grid {
     }
 
     pub fn generation(&mut self) {
-        let num_channels = self.rule.num_channels;
         let total_cells = self.width * self.height;
-
-        let expected_size = total_cells * num_channels;
+        let expected_size = total_cells * self.rule.num_channels;
         if self.cell_data.len() != expected_size {
             self.cell_data.resize(expected_size, 0.0);
         }
         if self.next_cell_data.len() != expected_size {
             self.next_cell_data.resize(expected_size, 0.0);
         }
+
+        let transition = self.rule.transition.clone();
+        let state_type = self.rule.state_type.clone();
+
+        match transition {
+            Transition::LeniaGrowth => {
+                self.lenia_generation_inner();
+            }
+            Transition::BirthSurvive { birth, survive, .. } => {
+                self.birth_survive_inner(&birth, &survive);
+            }
+        }
+
+        if state_type == StateType::DISCRETE {
+            self.quantize_state();
+        }
+    }
+
+    fn lenia_generation_inner(&mut self) {
+        let num_channels = self.rule.num_channels;
 
         let cell_data = &self.cell_data;
         let rule = &self.rule;
@@ -338,6 +356,80 @@ impl Grid {
             });
 
         std::mem::swap(&mut self.cell_data, &mut self.next_cell_data);
+    }
+
+    fn count_moore_neighbors(
+        cell_data: &[f32],
+        pos: IVec2,
+        width: usize,
+        height: usize,
+        channel: usize,
+        num_channels: usize,
+    ) -> u8 {
+        let gw = width as i32;
+        let gh = height as i32;
+        let mut count = 0u8;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let nx = pos.x + dx;
+                let ny = pos.y + dy;
+                let nx = nx - (nx >= gw) as i32 * gw + (nx < 0) as i32 * gw;
+                let ny = ny - (ny >= gh) as i32 * gh + (ny < 0) as i32 * gh;
+                let idx = (nx + ny * gw) as usize * num_channels + channel;
+                if cell_data[idx] > 0.0 {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    fn birth_survive_inner(&mut self, birth: &[u8], survive: &[u8]) {
+        let num_channels = self.rule.num_channels;
+        let width = self.width;
+        let height = self.height;
+        let n_states = self.rule.num_discrete_states;
+        let max_state_f = (n_states - 1) as f32;
+
+        let cell_data = &self.cell_data;
+
+        self.next_cell_data
+            .par_chunks_mut(num_channels)
+            .enumerate()
+            .for_each(|(idx, chunk)| {
+                let pos = IVec2::new(idx as i32 % width as i32, idx as i32 / width as i32);
+                for c in 0..num_channels {
+                    let current = cell_data[idx * num_channels + c];
+                    let count = Self::count_moore_neighbors(
+                        cell_data, pos, width, height, c, num_channels,
+                    );
+                    let new_val = if current <= 0.0 {
+                        if birth.contains(&count) { 1.0 } else { 0.0 }
+                    } else {
+                        if survive.contains(&count) {
+                            current
+                        } else {
+                            let cur_level = (current * max_state_f).round();
+                            let new_level = (cur_level - 1.0).max(0.0);
+                            new_level / max_state_f
+                        }
+                    };
+                    chunk[c] = new_val;
+                }
+            });
+
+        std::mem::swap(&mut self.cell_data, &mut self.next_cell_data);
+    }
+
+    fn quantize_state(&mut self) {
+        let n = self.rule.num_discrete_states;
+        if n <= 1 { return; }
+        let n_minus_1 = (n - 1) as f32;
+        for val in self.cell_data.iter_mut() {
+            let q = (*val * n_minus_1).round() / n_minus_1;
+            *val = q.clamp(0.0, 1.0);
+        }
     }
 
     pub fn pause(&mut self) {

@@ -4,11 +4,45 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rule {
     pub state_type: StateType,
+    #[serde(default = "default_discrete_states")]
+    pub num_discrete_states: usize,
+    #[serde(default)]
+    pub transition: Transition,
     pub delta: f32,
     pub kernels: Vec<KernelDef>,
     pub num_channels: usize,
     #[serde(default)]
     pub mode: RuleMode,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Transition {
+    #[serde(rename = "lenia_growth")]
+    LeniaGrowth,
+    #[serde(rename = "birth_survive")]
+    BirthSurvive {
+        birth: Vec<u8>,
+        survive: Vec<u8>,
+    },
+}
+
+impl Default for Transition {
+    fn default() -> Self {
+        Self::LeniaGrowth
+    }
+}
+
+impl Transition {
+    pub fn conway() -> Self {
+        Self::BirthSurvive {
+            birth: vec![3],
+            survive: vec![2, 3],
+        }
+    }
+}
+
+fn default_discrete_states() -> usize {
+    2
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -42,6 +76,8 @@ impl Rule {
     pub fn single_channel(mu: f32, sigma: f32, radius: i32) -> Self {
         Self {
             state_type: StateType::CONTINUOUS,
+            num_discrete_states: 2,
+            transition: Transition::LeniaGrowth,
             delta: 0.1,
             kernels: vec![KernelDef::default_single(mu, sigma, radius)],
             num_channels: 1,
@@ -52,9 +88,23 @@ impl Rule {
     pub fn multi_channel(kernels: Vec<KernelDef>, num_channels: usize) -> Self {
         Self {
             state_type: StateType::CONTINUOUS,
+            num_discrete_states: 2,
+            transition: Transition::LeniaGrowth,
             delta: 0.1,
             kernels,
             num_channels,
+            mode: RuleMode::Sum,
+        }
+    }
+
+    pub fn conway() -> Self {
+        Self {
+            state_type: StateType::DISCRETE,
+            num_discrete_states: 2,
+            transition: Transition::conway(),
+            delta: 1.0,
+            kernels: Vec::new(),
+            num_channels: 1,
             mode: RuleMode::Sum,
         }
     }
@@ -182,7 +232,7 @@ impl KernelDef {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateType {
     CONTINUOUS,
