@@ -1,0 +1,42 @@
+{
+  "name": "F-pentomino",
+  "genus": "Methuselah",
+  "rule": {
+    "state_type": "discrete",
+    "num_discrete_states": 2,
+    "num_channels": 1,
+    "transition": {
+      "birth_survive": {
+        "birth": [
+          3
+        ],
+        "survive": [
+          2,
+          3
+        ]
+      }
+    },
+    "delta": 1.0,
+    "mode": "sum",
+    "kernels": []
+  },
+  "channels": [
+    [
+      [
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        1,
+        0
+      ],
+      [
+        0,
+        1,
+        0
+      ]
+    ]
+  ]
+}
