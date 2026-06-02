@@ -1,5 +1,5 @@
 {
-  "name": "Glider",
+  "name": "LWSS",
   "genus": "Spaceship",
   "rule": {
     "state_type": "discrete",
@@ -23,6 +23,8 @@
   "channels": [
     [
       [
+        1,
+        0,
         0,
         1,
         0
@@ -30,9 +32,20 @@
       [
         0,
         0,
+        0,
+        0,
         1
       ],
       [
+        1,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        1,
         1,
         1,
         1

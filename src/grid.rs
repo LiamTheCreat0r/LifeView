@@ -19,6 +19,8 @@ pub struct Grid {
     pub grid_coloration: GridColoration,
     pub paused: bool,
     pub generation_type: GenerationType,
+    pub generations_per_second: f32,
+    pub gen_accumulator: f32,
     pub kernel_caches: Vec<KernelCache>,
     pub prev_kernel_sig: Vec<KernelSignature>,
 }
@@ -54,6 +56,8 @@ impl Grid {
             grid_coloration: GridColoration::default(),
             paused: true,
             generation_type: GenerationType::RANDOM,
+            generations_per_second: 64.0,
+            gen_accumulator: 0.0,
             kernel_caches: Vec::new(),
             prev_kernel_sig: Vec::new(),
         };
@@ -482,17 +486,27 @@ impl Grid {
     }
 }
 
-pub fn update_generation(grid: Option<ResMut<Grid>>) {
+pub fn update_generation(
+    time: Res<Time>,
+    grid: Option<ResMut<Grid>>,
+) {
     let Some(mut grid) = grid else {
         return;
     };
     if grid.paused {
         return;
     }
-    if grid.kernels_need_rebuild() {
-        grid.rebuild_all_kernels();
+
+    grid.gen_accumulator += time.delta_secs();
+    let interval = 1.0 / grid.generations_per_second.max(0.001);
+
+    while grid.gen_accumulator >= interval {
+        grid.gen_accumulator -= interval;
+        if grid.kernels_need_rebuild() {
+            grid.rebuild_all_kernels();
+        }
+        grid.generation();
     }
-    grid.generation();
 }
 
 #[cfg(test)]

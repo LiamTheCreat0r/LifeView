@@ -190,6 +190,8 @@ pub fn ui(
                     grid.rule.num_discrete_states = n as usize;
                 }
 
+                ui.add(egui::Slider::new(&mut grid.generations_per_second, 1.0..=200.0).text("Gen/s"));
+
                 ui.separator();
 
                 // ── Display ────────────────────────────────────────

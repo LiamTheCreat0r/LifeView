@@ -25,6 +25,7 @@ pub struct Shape {
 #[derive(Deserialize)]
 struct ShapeJson {
     name: String,
+    genus: Option<String>,
     rule: Rule,
     channels: Vec<Vec<Vec<f32>>>,
 }
@@ -51,6 +52,11 @@ const GENUS_DISPLAY_NAMES: &[(&str, &str)] = &[
     ("Lacuna", "Lacuna (环空目)"),
     ("Medusa", "Medusa (水母目)"),
     ("Anemone", "Anemone (海葵目)"),
+    ("StillLife", "Still Life"),
+    ("Oscillator", "Oscillator"),
+    ("Spaceship", "Spaceship"),
+    ("Methuselah", "Methuselah"),
+    ("Gun", "Gun"),
 ];
 
 fn get_genus_display(genus: &str) -> &str {
@@ -154,6 +160,11 @@ impl Shape {
             Vec::new(),
             Vec::new(),
         );
+
+        if let Some(ref genus) = parsed.genus {
+            shape.genus = genus.clone();
+            shape.genus_display = get_genus_display(genus).to_string();
+        }
 
         for (ch_idx, channel_grid) in parsed.channels.iter().enumerate() {
             let refs: Vec<&[f32]> = channel_grid.iter().map(|row| row.as_slice()).collect();

@@ -1,6 +1,6 @@
 {
-  "name": "Glider",
-  "genus": "Spaceship",
+  "name": "Thunderbird",
+  "genus": "Methuselah",
   "rule": {
     "state_type": "discrete",
     "num_discrete_states": 2,
@@ -25,17 +25,38 @@
       [
         0,
         1,
+        0,
         0
       ],
       [
         0,
+        1,
         0,
-        1
+        0
       ],
       [
         1,
         1,
+        1,
         1
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
       ]
     ]
   ]
