@@ -164,17 +164,13 @@ fn topbar(ctx: &egui::Context, grid: &mut Grid, state: &mut UiState) {
             let width = ui.available_width();
             ui.horizontal_centered(|ui| {
                 ui.label(
-                    egui::RichText::new("LENIA")
+                    egui::RichText::new("LifeView")
                         .size(16.0)
                         .strong()
                         .color(theme::ACCENT),
                 );
                 if width > 560.0 {
-                    ui.label(
-                        egui::RichText::new("LifeView")
-                            .size(12.0)
-                            .color(theme::MUTED),
-                    );
+                    ui.label(egui::RichText::new("LENIA").size(12.0).color(theme::MUTED));
                 }
                 ui.add_space(4.0);
                 ui.separator();
