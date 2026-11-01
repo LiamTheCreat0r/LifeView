@@ -33,46 +33,51 @@ def ch2val(c):
         return (ord(c[0]) - ord('p')) * 24 + (ord(c[1]) - ord('A') + 25)
 
 def rle2cells_2d(st):
-    """Official Lenia RLE decoder for 2D grids."""
-    st = st.rstrip('!') + '$'  # Append row delimiter
+    """Official Lenia RLE decoder for 2D grids.
+
+    Handles repeated rows (``5$``), repeated cells (``5A``) and the
+    ``p``..``y``/``@`` high-value prefixes used by the official encoder.
+    """
     rows = []
     current_row = []
     last = ''
     count = ''
+    delims = ['', '$', '%']
+    st = st.rstrip('!') + '$'  # Append row delimiter
 
     for ch in st:
         if ch.isdigit():
             count += ch
         elif ch in 'pqrstuvwxy@':
             last = ch
-        elif ch == '$':
-            # End of row - push current_row to rows
-            rows.append(current_row)
-            current_row = []
-            last = ''
-            count = ''
         else:
-            # Cell value
-            val = ch2val(last + ch) / 255.0
-            repeat = int(count) if count else 1
-            current_row.extend([val] * repeat)
+            token = last + ch
+            if token not in delims:
+                # Cell value, repeated `count` times.
+                val = ch2val(token) / 255.0
+                repeat = int(count) if count else 1
+                current_row.extend([val] * repeat)
+            else:
+                dim = delims.index(token)
+                if dim >= 1:
+                    # End of row: append it (repeated `count` times).
+                    rows.append(current_row)
+                    if count:
+                        rows.extend([[] for _ in range(int(count) - 1)])
+                    current_row = []
+                # dim 2 (%) is a 3D separator and is unused for 2D grids.
             last = ''
             count = ''
 
-    # Remove last empty row if present
-    if rows and not rows[-1]:
-        rows.pop()
-
-    if not rows:
-        return [[]]
-
-    # Pad rows to same width
-    max_w = max(len(r) for r in rows)
+    # Pad rows to the same width.
+    max_w = max((len(r) for r in rows), default=0)
     for r in rows:
-        while len(r) < max_w:
-            r.append(0.0)
+        r.extend([0.0] * (max_w - len(r)))
 
     return rows
+
+KERNEL_KIND_BY_KN = {1: "quad4", 2: "bump4", 3: "step"}
+GROWTH_KIND_BY_GN = {1: "polynomial", 2: "gaussian", 3: "step"}
 
 def lenia_to_our_params(entry):
     p = entry.get("params", {})
@@ -82,10 +87,19 @@ def lenia_to_our_params(entry):
     m = p.get("m", 0.15)
     s = p.get("s", 0.015)
     kn = p.get("kn", 1)
+    gn = p.get("gn", 1)
+
+    kernel_kind = KERNEL_KIND_BY_KN.get(kn)
+    growth_kind = GROWTH_KIND_BY_GN.get(gn)
+    if kernel_kind is None:
+        raise ValueError(f"unsupported kernel type kn={kn}")
+    if growth_kind is None:
+        raise ValueError(f"unsupported growth type gn={gn}")
 
     peaks = [float(Fraction(x.strip())) for x in b_str.split(",")]
     delta = 1.0 / T
-    polynomial = (kn == 1)
+    # Legacy flag: only true when the old Quad4 + polynomial pairing applies.
+    polynomial = (kn == 1 and gn == 1)
 
     kernel = {
         "mu": m,
@@ -100,6 +114,8 @@ def lenia_to_our_params(entry):
         "sum_mode": False,
         "polynomial": polynomial,
         "alpha": 4.0,
+        "kernel_kind": kernel_kind,
+        "growth_kind": growth_kind,
     }
 
     rule = {
@@ -170,7 +186,7 @@ for genus in sorted(species_data.keys()):
     count = len(species_data[genus])
     print(f"  {genus}: {count} species")
 
-OUT_DIR = "assets/shapes/patterns"
+OUT_DIR = "assets/shapes/Lenia"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 written = 0

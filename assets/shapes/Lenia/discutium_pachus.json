@@ -19,7 +19,9 @@
         "use_target": false,
         "sum_mode": false,
         "polynomial": false,
-        "alpha": 4.0
+        "alpha": 4.0,
+        "kernel_kind": "step",
+        "growth_kind": "step"
       }
     ]
   },

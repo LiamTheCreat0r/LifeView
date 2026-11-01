@@ -115,7 +115,6 @@ pub fn show(
                                 });
 
                                 if clicked {
-                                    grid.clear();
                                     grid.spawn_shape(shape.name.clone(), shapes.0.clone());
                                     state.selected_shape = Some(shape.name.clone());
                                 }

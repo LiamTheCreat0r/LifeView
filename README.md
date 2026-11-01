@@ -10,35 +10,45 @@ LifeView uses a continuous growth function to evolve cell states each generation
 
 - **μ (micro)** — growth peak. Neighborhood value at which growth is maximal. Default: `0.15`
 - **σ (sigma)** — growth width. Controls how narrowly the growth curve peaks around μ. Default: `0.015`
-- **radius** — neighborh
-
-
-ood radius (in cells). Larger = more cells influence each update. Default: `13`
+- **radius** — neighborhood radius (in cells). Larger = more cells influence each update. Default: `13`
 - **Δt (delta)** — time step per generation. Controls simulation speed. Default: `0.1`
 
-### Growth function
+### Kernels
 
-```
-growth(u) = 2 · exp(-((u - μ)² / (2σ²))) - 1
-```
+The convolution kernel is radial: `w(d) = kernel(d / r)`, where `r` is the effective radius. Four kernel shapes are available:
 
-Where `u` is the weighted neighborhood average using a bell kernel:
+| Kind                   | Formula                                       |
+| ---------------------- | --------------------------------------------- |
+| **Gaussian** (default) | `exp(-((t - 0.5) / 0.15)² / 2)`               |
+| **Quad4**              | `(4t(1 - t))⁴`                                |
+| **Bump4**              | `exp(4 - 1 / (t(1 - t)))`                     |
+| **Step**               | `1` for `t ∈ [0.25, 0.75]`, otherwise `0`     |
 
-```
-w(d) = exp(-((d/r - 0.5) / 0.15)² / 2)
-```
+with `t = d / r`. Multi-peak kernels split the radius into bands and scale each band by the corresponding peak weight.
+
+### Growth functions
+
+| Kind           | Formula                                                              |
+| -------------- | -------------------------------------------------------------------- |
+| **Gaussian**   | `2 · exp(-((u - μ)² / (2σ²))) - 1`                                   |
+| **Polynomial** | `2 · (1 - (\|u - μ\| / 3σ)²)^α - 1` inside `3σ`, otherwise `-1`     |
+| **Step**       | `+1` if `\|u - μ\| ≤ σ`, otherwise `-1`                             |
 
 Each cell updates: `new_state = clamp(old_state + growth(u) · Δt, 0, 1)`
 
-### Polynomial growth
+The polynomial exponent α (default 4.0) controls the steepness of the falloff.
 
-Toggling **Polynomial growth** replaces the Gaussian with a compact quartic:
+### Official Lenia species
 
-```
-growth(u) = 2 · (1 - (|u - μ| / 3σ)²)⁴ - 1   if |u - μ| ≤ 3σ, else -1
-```
+The bundled `assets/shapes/Lenia` species are imported from Bert Chan's [`animals.json`](https://github.com/Chakazul/Lenia/blob/master/Python/animals.json). The official `kn` and `gn` parameters map directly:
 
-The exponent α (default 4.0) controls the steepness of the falloff.
+| `kn` | kernel | `gn` | growth     |
+| ---- | ------ | ---- | ---------- |
+| 1    | Quad4  | 1    | Polynomial |
+| 2    | Bump4  | 2    | Gaussian   |
+| 3    | Step   | 3    | Step       |
+
+Older shape files use a `polynomial` boolean instead. When the explicit `kernel_kind` / `growth_kind` fields are absent, `polynomial: true` means Quad4 + polynomial growth and `false` means Gaussian + Gaussian growth.
 
 ### Asymptotic (target mode)
 

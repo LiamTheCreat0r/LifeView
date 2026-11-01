@@ -83,7 +83,7 @@ impl Grid {
                 base_radius: k.base_radius,
                 relative_radius: k.relative_radius,
                 peaks: k.peaks.clone(),
-                kernel_kind: k.kernel_kind.clone(),
+                kernel_kind: k.effective_kernel_kind(),
             };
             if current_sig != *sig {
                 return true;
@@ -101,7 +101,7 @@ impl Grid {
                 base_radius: kernel_def.base_radius,
                 relative_radius: kernel_def.relative_radius,
                 peaks: kernel_def.peaks.clone(),
-                kernel_kind: kernel_def.kernel_kind.clone(),
+                kernel_kind: kernel_def.effective_kernel_kind(),
             });
             self.kernel_caches.push(cache);
         }
@@ -122,7 +122,8 @@ impl Grid {
                 }
 
                 let t = d / r as f32;
-                let w = Self::kernel_weight(t, &kernel_def.peaks, &kernel_def.kernel_kind);
+                let w =
+                    Self::kernel_weight(t, &kernel_def.peaks, &kernel_def.effective_kernel_kind());
                 weights.push((IVec2::new(x, y), w));
                 sum += w;
             }
@@ -132,30 +133,36 @@ impl Grid {
     }
 
     fn kernel_weight(t: f32, peaks: &[f32], kernel_kind: &KernelKind) -> f32 {
-        match kernel_kind {
-            KernelKind::Bump4 => {
-                if peaks.len() == 1 {
-                    let bell_t = (t - 0.5) / 0.15;
-                    return (-bell_t.powi(2) / 2.0).exp();
-                }
+        let (idx, frac) = if peaks.len() == 1 {
+            (0, t)
+        } else {
+            let idx = ((t * peaks.len() as f32).floor() as usize).min(peaks.len() - 1);
+            (idx, t * peaks.len() as f32 - idx as f32)
+        };
+        let peak = peaks[idx];
 
-                let idx = (t * peaks.len() as f32).floor() as usize;
-                let idx = idx.min(peaks.len() - 1);
-                let frac = t * peaks.len() as f32 - idx as f32;
+        match kernel_kind {
+            KernelKind::Gaussian => {
                 let bell_frac = (frac - 0.5) / 0.15;
-                peaks[idx] * (-bell_frac.powi(2) / 2.0).exp()
+                peak * (-bell_frac.powi(2) / 2.0).exp()
             }
             KernelKind::Quad4 => {
-                if peaks.len() == 1 {
-                    let k = 4.0 * t * (1.0 - t);
-                    return k.powi(4);
-                }
-
-                let idx = (t * peaks.len() as f32).floor() as usize;
-                let idx = idx.min(peaks.len() - 1);
-                let frac = t * peaks.len() as f32 - idx as f32;
                 let k = 4.0 * frac * (1.0 - frac);
-                peaks[idx] * k.powi(4)
+                peak * k.powi(4)
+            }
+            KernelKind::Bump4 => {
+                if frac <= 0.0 || frac >= 1.0 {
+                    0.0
+                } else {
+                    peak * (4.0 - 1.0 / (frac * (1.0 - frac))).exp()
+                }
+            }
+            KernelKind::Step => {
+                if (0.25..=0.75).contains(&frac) {
+                    peak
+                } else {
+                    0.0
+                }
             }
         }
     }
@@ -638,6 +645,60 @@ mod tests {
         grid.generation();
 
         assert_eq!(grid.generation_count, 1);
+    }
+
+    #[test]
+    fn spawning_a_shape_keeps_the_simulation_running() {
+        let mut grid = Grid::new(20, 20, 5.0);
+        grid.paused = false;
+
+        let shapes = crate::shapes::Shapes::load_embedded();
+        let shape_name = shapes.0[0].name.clone();
+        grid.spawn_shape(shape_name, shapes.0);
+
+        assert!(!grid.paused);
+    }
+
+    fn run_shape(name: &str, size: usize, generations: usize) -> f32 {
+        let mut grid = Grid::new(size, size, 5.0);
+        let shapes = crate::shapes::Shapes::load_embedded();
+        grid.spawn_shape(name.to_string(), shapes.0);
+
+        let initial: f32 = grid.cell_data.iter().sum();
+        assert!(initial > 0.0, "{name} spawned an empty grid");
+
+        for _ in 0..generations {
+            grid.generation();
+        }
+
+        grid.cell_data.iter().sum::<f32>() / initial
+    }
+
+    #[test]
+    fn discutium_pachus_uses_the_step_rule_and_stays_bounded() {
+        let ratio = run_shape("Discutium pachus", 96, 200);
+        assert!(
+            (0.5..2.0).contains(&ratio),
+            "Discutium pachus mass ratio {ratio} outside the stable range"
+        );
+    }
+
+    #[test]
+    fn orbium_bicaudatus_ignis_stays_alive() {
+        let ratio = run_shape("Orbium bicaudatus ignis", 96, 150);
+        assert!(
+            (0.5..2.0).contains(&ratio),
+            "Orbium bicaudatus ignis mass ratio {ratio} outside the stable range"
+        );
+    }
+
+    #[test]
+    fn gyrorbium_revolvens_stays_alive() {
+        let ratio = run_shape("Gyrorbium revolvens", 96, 150);
+        assert!(
+            (0.5..2.0).contains(&ratio),
+            "Gyrorbium revolvens mass ratio {ratio} outside the stable range"
+        );
     }
 
     #[test]

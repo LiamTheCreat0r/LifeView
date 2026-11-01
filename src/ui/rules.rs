@@ -2,7 +2,7 @@ use bevy_egui::egui;
 use egui::RichText;
 
 use crate::grid::Grid;
-use crate::rule::{KernelDef, KernelKind, RuleMode, StateType, Transition};
+use crate::rule::{GrowthKind, KernelDef, KernelKind, RuleMode, StateType, Transition};
 
 use super::{theme, widgets};
 
@@ -196,18 +196,23 @@ pub fn show(ui: &mut egui::Ui, grid: &mut Grid) {
                     ui.add(egui::Slider::new(&mut kernel.height, 0.0..=1.0).text("η height"))
                         .on_hover_text("Weight of this kernel's contribution.");
 
-                    let mut kind = kernel.kernel_kind.clone();
+                    let current_kind = kernel.effective_kernel_kind();
+                    let mut kind = current_kind.clone();
                     egui::ComboBox::from_id_salt(("kind", index))
                         .selected_text(match kind {
-                            KernelKind::Bump4 => "Bump4",
+                            KernelKind::Gaussian => "Gaussian",
                             KernelKind::Quad4 => "Quad4",
+                            KernelKind::Bump4 => "Bump4",
+                            KernelKind::Step => "Step",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut kind, KernelKind::Bump4, "Bump4");
+                            ui.selectable_value(&mut kind, KernelKind::Gaussian, "Gaussian");
                             ui.selectable_value(&mut kind, KernelKind::Quad4, "Quad4");
+                            ui.selectable_value(&mut kind, KernelKind::Bump4, "Bump4");
+                            ui.selectable_value(&mut kind, KernelKind::Step, "Step");
                         });
-                    if kind != kernel.kernel_kind {
-                        kernel.kernel_kind = kind;
+                    if kind != current_kind {
+                        kernel.kernel_kind = Some(kind);
                         kind_changed = true;
                     }
 
@@ -215,12 +220,34 @@ pub fn show(ui: &mut egui::Ui, grid: &mut Grid) {
                         .on_hover_text(
                             "Drive cells toward the kernel target instead of adding growth.",
                         );
-                    ui.checkbox(&mut kernel.polynomial, "Polynomial growth")
-                        .on_hover_text(
-                            "Use the compact quartic growth curve instead of a Gaussian.",
-                        );
 
-                    if kernel.polynomial {
+                    let current_growth = kernel.effective_growth_kind();
+                    let mut growth = current_growth.clone();
+                    egui::ComboBox::from_id_salt(("growth", index))
+                        .selected_text(match growth {
+                            GrowthKind::Polynomial => "Polynomial growth",
+                            GrowthKind::Gaussian => "Gaussian growth",
+                            GrowthKind::Step => "Step growth",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut growth,
+                                GrowthKind::Polynomial,
+                                "Polynomial growth",
+                            );
+                            ui.selectable_value(
+                                &mut growth,
+                                GrowthKind::Gaussian,
+                                "Gaussian growth",
+                            );
+                            ui.selectable_value(&mut growth, GrowthKind::Step, "Step growth");
+                        });
+                    if growth != current_growth {
+                        kernel.polynomial = growth == GrowthKind::Polynomial;
+                        kernel.growth_kind = Some(growth);
+                    }
+
+                    if kernel.effective_growth_kind() == GrowthKind::Polynomial {
                         ui.add(egui::Slider::new(&mut kernel.alpha, 1.0..=12.0).text("α exponent"))
                             .on_hover_text("Steepness of the polynomial falloff.");
                     }
@@ -336,6 +363,7 @@ fn add_default_kernel(grid: &mut Grid) {
             polynomial: kernel.polynomial,
             alpha: kernel.alpha,
             kernel_kind: kernel.kernel_kind.clone(),
+            growth_kind: kernel.growth_kind.clone(),
         }
     } else {
         KernelDef::default_single(0.15, 0.015, 13)

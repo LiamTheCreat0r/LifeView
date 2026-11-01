@@ -282,6 +282,7 @@ pub fn load_shapes(mut shapes: ResMut<Shapes>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rule::{GrowthKind, KernelKind};
 
     #[test]
     fn embedded_shapes_load() {
@@ -290,5 +291,33 @@ mod tests {
         assert!(shapes.0.len() >= 60, "expected the bundled shape library");
         assert!(shapes.0.iter().any(|shape| shape.category == "Conway"));
         assert!(shapes.0.iter().any(|shape| shape.category == "Lenia"));
+    }
+
+    #[test]
+    fn discutium_pachus_uses_the_official_step_rule() {
+        let shapes = Shapes::load_embedded();
+        let shape = shapes
+            .0
+            .iter()
+            .find(|shape| shape.name == "Discutium pachus")
+            .expect("Discutium pachus should be bundled");
+
+        let kernel = &shape.optimal_rule.kernels[0];
+        assert_eq!(kernel.effective_kernel_kind(), KernelKind::Step);
+        assert_eq!(kernel.effective_growth_kind(), GrowthKind::Step);
+    }
+
+    #[test]
+    fn official_quad4_shapes_derive_from_the_legacy_flag() {
+        let shapes = Shapes::load_embedded();
+        let shape = shapes
+            .0
+            .iter()
+            .find(|shape| shape.name == "Orbium unicaudatus")
+            .expect("Orbium unicaudatus should be bundled");
+
+        let kernel = &shape.optimal_rule.kernels[0];
+        assert_eq!(kernel.effective_kernel_kind(), KernelKind::Quad4);
+        assert_eq!(kernel.effective_growth_kind(), GrowthKind::Polynomial);
     }
 }
