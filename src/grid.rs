@@ -21,6 +21,8 @@ pub struct Grid {
     pub generation_type: GenerationType,
     pub generations_per_second: f32,
     pub gen_accumulator: f32,
+    pub generation_count: u64,
+    pub step_once: bool,
     pub kernel_caches: Vec<KernelCache>,
     pub prev_kernel_sig: Vec<KernelSignature>,
 }
@@ -58,6 +60,8 @@ impl Grid {
             generation_type: GenerationType::RANDOM,
             generations_per_second: 64.0,
             gen_accumulator: 0.0,
+            generation_count: 0,
+            step_once: false,
             kernel_caches: Vec::new(),
             prev_kernel_sig: Vec::new(),
         };
@@ -158,6 +162,9 @@ impl Grid {
 
     pub fn init(&mut self) {
         self.paused = true;
+        self.gen_accumulator = 0.0;
+        self.generation_count = 0;
+        self.step_once = false;
         let num_channels = self.rule.num_channels;
         let total_cells = self.width * self.height;
         let cx = self.width as f32 / 2.0;
@@ -195,6 +202,9 @@ impl Grid {
 
     pub fn clear(&mut self) {
         self.paused = true;
+        self.gen_accumulator = 0.0;
+        self.generation_count = 0;
+        self.step_once = false;
         let num_channels = self.rule.num_channels;
         let total_cells = self.width * self.height;
         for i in 0..total_cells {
@@ -204,6 +214,7 @@ impl Grid {
         }
     }
 
+    #[allow(dead_code)] // Kept as part of the simulation data API.
     pub fn life_around(&self, pos: IVec2, kernel_idx: usize, _channel: usize) -> f32 {
         let cache = &self.kernel_caches[kernel_idx];
         let kernel_def = &self.rule.kernels[kernel_idx];
@@ -254,7 +265,11 @@ impl Grid {
             result += cell_data[(nx + ny * gw) as usize * num_channels + source_channel] * weight;
         }
 
-        if cache.sum == 0.0 { 0.0 } else { result / cache.sum }
+        if cache.sum == 0.0 {
+            0.0
+        } else {
+            result / cache.sum
+        }
     }
 
     pub fn idx_to_vector(&self, idx: i32) -> IVec2 {
@@ -268,10 +283,7 @@ impl Grid {
     pub fn wrap_pos(&self, pos: IVec2) -> IVec2 {
         let w = self.width as i32;
         let h = self.height as i32;
-        IVec2::new(
-            ((pos.x % w) + w) % w,
-            ((pos.y % h) + h) % h,
-        )
+        IVec2::new(((pos.x % w) + w) % w, ((pos.y % h) + h) % h)
     }
 
     pub fn generation(&mut self) {
@@ -299,6 +311,8 @@ impl Grid {
         if state_type == StateType::DISCRETE {
             self.quantize_state();
         }
+
+        self.generation_count = self.generation_count.wrapping_add(1);
     }
 
     fn lenia_generation_inner(&mut self) {
@@ -327,8 +341,14 @@ impl Grid {
                         }
 
                         let u = Self::convolve_cell(
-                            pos, ki, width, height, num_channels,
-                            kernel_caches, &rule.kernels, cell_data,
+                            pos,
+                            ki,
+                            width,
+                            height,
+                            num_channels,
+                            kernel_caches,
+                            &rule.kernels,
+                            cell_data,
                         );
                         let current_val = cell_data[idx * num_channels + c];
                         let g = if kernel_def.use_target {
@@ -349,7 +369,11 @@ impl Grid {
                     }
 
                     let growth = if count > 0 {
-                        if sum_mode { total / count as f32 } else { total }
+                        if sum_mode {
+                            total / count as f32
+                        } else {
+                            total
+                        }
                     } else {
                         0.0
                     };
@@ -375,7 +399,9 @@ impl Grid {
         let mut count = 0u8;
         for dy in -1..=1 {
             for dx in -1..=1 {
-                if dx == 0 && dy == 0 { continue; }
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
                 let nx = pos.x + dx;
                 let ny = pos.y + dy;
                 let nx = nx - (nx >= gw) as i32 * gw + (nx < 0) as i32 * gw;
@@ -405,9 +431,8 @@ impl Grid {
                 let pos = IVec2::new(idx as i32 % width as i32, idx as i32 / width as i32);
                 for c in 0..num_channels {
                     let current = cell_data[idx * num_channels + c];
-                    let count = Self::count_moore_neighbors(
-                        cell_data, pos, width, height, c, num_channels,
-                    );
+                    let count =
+                        Self::count_moore_neighbors(cell_data, pos, width, height, c, num_channels);
                     let new_val = if current <= 0.0 {
                         if birth.contains(&count) { 1.0 } else { 0.0 }
                     } else {
@@ -428,12 +453,63 @@ impl Grid {
 
     fn quantize_state(&mut self) {
         let n = self.rule.num_discrete_states;
-        if n <= 1 { return; }
+        if n <= 1 {
+            return;
+        }
         let n_minus_1 = (n - 1) as f32;
         for val in self.cell_data.iter_mut() {
             let q = (*val * n_minus_1).round() / n_minus_1;
             *val = q.clamp(0.0, 1.0);
         }
+    }
+
+    /// Request exactly one simulation step, even while paused.
+    pub fn step(&mut self) {
+        self.step_once = true;
+    }
+
+    /// Resize the grid while keeping the overlapping region of the simulation.
+    ///
+    /// Cells outside the old grid are filled by tiling the previous contents
+    /// instead of leaving a black band where new rows/columns were added.
+    pub fn resize_preserving(&mut self, width: usize, height: usize, cell_size: f32) {
+        if width == self.width
+            && height == self.height
+            && (cell_size - self.cell_size).abs() <= f32::EPSILON
+        {
+            return;
+        }
+
+        let num_channels = self.rule.num_channels;
+        let old_width = self.width;
+        let old_height = self.height;
+        let old_data = std::mem::take(&mut self.cell_data);
+        let mut new_data = vec![0.0; width * height * num_channels];
+
+        for y in 0..height {
+            for x in 0..width {
+                let source = if x < old_width && y < old_height {
+                    (y * old_width + x) * num_channels
+                } else if old_width > 0 && old_height > 0 {
+                    ((y % old_height) * old_width + (x % old_width)) * num_channels
+                } else {
+                    continue;
+                };
+                let target = (y * width + x) * num_channels;
+                for channel in 0..num_channels {
+                    if source + channel < old_data.len() {
+                        new_data[target + channel] = old_data[source + channel];
+                    }
+                }
+            }
+        }
+
+        self.cell_data = new_data;
+        self.next_cell_data = vec![0.0; width * height * num_channels];
+        self.width = width;
+        self.height = height;
+        self.cell_size = cell_size;
+        self.prev_cell_size = cell_size;
     }
 
     pub fn pause(&mut self) {
@@ -449,6 +525,9 @@ impl Grid {
         }
 
         self.rule = shape.optimal_rule.clone();
+        self.generation_count = 0;
+        self.gen_accumulator = 0.0;
+        self.step_once = false;
         if self.kernels_need_rebuild() {
             self.rebuild_all_kernels();
         }
@@ -486,13 +565,21 @@ impl Grid {
     }
 }
 
-pub fn update_generation(
-    time: Res<Time>,
-    grid: Option<ResMut<Grid>>,
-) {
+pub fn update_generation(time: Res<Time>, grid: Option<ResMut<Grid>>) {
     let Some(mut grid) = grid else {
         return;
     };
+
+    if grid.step_once {
+        grid.step_once = false;
+        grid.gen_accumulator = 0.0;
+        if grid.kernels_need_rebuild() {
+            grid.rebuild_all_kernels();
+        }
+        grid.generation();
+        return;
+    }
+
     if grid.paused {
         return;
     }
@@ -541,6 +628,29 @@ mod tests {
         assert_eq!(grid.wrap_pos(IVec2::new(-1, 0)), IVec2::new(99, 0));
         assert_eq!(grid.wrap_pos(IVec2::new(-1, -1)), IVec2::new(99, 49));
         assert_eq!(grid.wrap_pos(IVec2::new(0, -1)), IVec2::new(0, 49));
+    }
+
+    #[test]
+    fn generation_increments_counter() {
+        let mut grid = Grid::new(20, 20, 5.0);
+        assert_eq!(grid.generation_count, 0);
+
+        grid.generation();
+
+        assert_eq!(grid.generation_count, 1);
+    }
+
+    #[test]
+    fn resize_preserves_overlapping_cells() {
+        let mut grid = Grid::new(20, 20, 5.0);
+        grid.cell_data[0] = 0.75;
+
+        grid.resize_preserving(10, 10, 8.0);
+
+        assert_eq!(grid.width, 10);
+        assert_eq!(grid.height, 10);
+        assert_eq!(grid.cell_size, 8.0);
+        assert_eq!(grid.cell_data[0], 0.75);
     }
 }
 

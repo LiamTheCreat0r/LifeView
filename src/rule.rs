@@ -20,10 +20,7 @@ pub enum Transition {
     #[serde(rename = "lenia_growth")]
     LeniaGrowth,
     #[serde(rename = "birth_survive")]
-    BirthSurvive {
-        birth: Vec<u8>,
-        survive: Vec<u8>,
-    },
+    BirthSurvive { birth: Vec<u8>, survive: Vec<u8> },
 }
 
 impl Default for Transition {
@@ -85,6 +82,7 @@ impl Rule {
         }
     }
 
+    #[allow(dead_code)]
     pub fn multi_channel(kernels: Vec<KernelDef>, num_channels: usize) -> Self {
         Self {
             state_type: StateType::CONTINUOUS,
@@ -97,6 +95,7 @@ impl Rule {
         }
     }
 
+    #[allow(dead_code)]
     pub fn conway() -> Self {
         Self {
             state_type: StateType::DISCRETE,
@@ -130,11 +129,13 @@ impl Rule {
         exp(-((u - k.mu).powi(2) / (2.0 * k.sigma * k.sigma)))
     }
 
+    #[allow(dead_code)]
     pub fn effective_radius(&self, kernel_idx: usize) -> i32 {
         let k = &self.kernels[kernel_idx];
         ((k.base_radius as f32) * k.relative_radius).ceil() as i32
     }
 
+    #[allow(dead_code)]
     pub fn max_radius(&self) -> i32 {
         self.kernels
             .iter()
@@ -189,6 +190,7 @@ impl KernelDef {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new(
         mu: f32,
         sigma: f32,
@@ -216,16 +218,19 @@ impl KernelDef {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_kernel_kind(mut self, kernel_kind: KernelKind) -> Self {
         self.kernel_kind = kernel_kind;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
-}
+    }
 
+    #[allow(dead_code)]
     pub fn with_target(mut self, use_target: bool) -> Self {
         self.use_target = use_target;
         self

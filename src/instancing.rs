@@ -28,9 +28,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::grid::Grid;
 use crate::grid_coloration::ColorGradient;
-use crate::interface::{PANEL_WIDTH, TOPBAR_HEIGHT};
-
-const BASE_CELL_WIDTH: usize = 75;
+use crate::ui::UiMetrics;
 
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
@@ -95,7 +93,14 @@ impl Plugin for CellMaterialPlugin {
         app.add_plugins(ExtractComponentPlugin::<GradientIndex>::default());
         app.add_plugins(ExtractComponentPlugin::<SmoothMode>::default());
         app.add_systems(Startup, setup);
-        app.add_systems(Update, (rebuild_grid_instances, update_cell_textures));
+        app.add_systems(
+            Update,
+            (
+                rebuild_grid_instances,
+                sync_camera.after(rebuild_grid_instances),
+                update_cell_textures,
+            ),
+        );
         app.add_systems(FixedUpdate, update_instance_data);
 
         app.sub_app_mut(RenderApp)
@@ -115,36 +120,86 @@ impl Plugin for CellMaterialPlugin {
     }
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, windows: Query<&Window>) {
+/// Align the top-left corner of the cell grid with the top-left corner of the
+/// viewport. The grid is rounded up to whole cells, so it may extend slightly
+/// past the right/bottom edges — anchoring the top-left keeps that overflow
+/// off-screen instead of leaving a gap next to the panel.
+fn sync_camera(
+    metrics: Res<UiMetrics>,
+    grid: Res<Grid>,
+    windows: Query<&Window>,
+    mut cameras: Query<&mut Transform, With<Camera2d>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let window_size = window.resolution.size();
+    let grid_size = Vec2::new(
+        grid.width as f32 * grid.cell_size,
+        grid.height as f32 * grid.cell_size,
+    );
+    let position = Vec2::new(
+        window_size.x / 2.0 - grid_size.x / 2.0 - metrics.panel_width,
+        metrics.topbar_height - window_size.y / 2.0 + grid_size.y / 2.0,
+    );
+
+    for mut transform in &mut cameras {
+        transform.translation.x = position.x;
+        transform.translation.y = position.y;
+    }
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    windows: Query<&Window>,
+    metrics: Res<UiMetrics>,
+) {
     let window = windows.single().unwrap();
     let base_cell_size = 12.0;
-    let visible_width = window.resolution.width() - PANEL_WIDTH;
-    let visible_height = window.resolution.height() - TOPBAR_HEIGHT;
+    let visible_width = window.resolution.width() - metrics.panel_width;
+    let visible_height = window.resolution.height() - metrics.topbar_height - metrics.status_height;
     let grid_width = (visible_width / base_cell_size) as usize;
     let grid_height = (visible_height / base_cell_size) as usize;
     let grid = Grid::new(grid_width.max(1), grid_height.max(1), base_cell_size);
 
     commands.spawn((
         Camera2d,
-        Transform::from_xyz(-PANEL_WIDTH / 2.0, TOPBAR_HEIGHT / 2.0, 0.0),
+        Transform::from_xyz(
+            -metrics.panel_width / 2.0,
+            (metrics.topbar_height - metrics.status_height) / 2.0,
+            0.0,
+        ),
     ));
 
     let num_channels = grid.rule.num_channels;
 
     let instances: Vec<CellInstance> = (0..grid.width * grid.height)
         .map(|i| {
-            let x = (i % grid.width) as f32 * base_cell_size - (grid.width as f32 * base_cell_size) / 2.0
+            let x = (i % grid.width) as f32 * base_cell_size
+                - (grid.width as f32 * base_cell_size) / 2.0
                 + base_cell_size / 2.0;
-            let y = (i / grid.width) as f32 * base_cell_size - (grid.height as f32 * base_cell_size) / 2.0
+            let y = (i / grid.width) as f32 * base_cell_size
+                - (grid.height as f32 * base_cell_size) / 2.0
                 + base_cell_size / 2.0;
-            let (r, g, b) = channels_to_rgb_flat(&grid.cell_data, i, num_channels, &grid.grid_coloration.gradient);
+            let (r, g, b) = channels_to_rgb_flat(
+                &grid.cell_data,
+                i,
+                num_channels,
+                &grid.grid_coloration.gradient,
+            );
             CellInstance {
                 position: Vec2::new(x, y),
                 cell_size: base_cell_size,
                 r,
                 g,
                 b,
-                smooth: if grid.grid_coloration.smooth { 1.0 } else { 0.0 },
+                smooth: if grid.grid_coloration.smooth {
+                    1.0
+                } else {
+                    0.0
+                },
             }
         })
         .collect();
@@ -193,7 +248,12 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut images: R
     commands.insert_resource(grid);
 }
 
-fn channels_to_rgb_flat(cell_data: &[f32], idx: usize, num_channels: usize, gradient: &ColorGradient) -> (f32, f32, f32) {
+fn channels_to_rgb_flat(
+    cell_data: &[f32],
+    idx: usize,
+    num_channels: usize,
+    gradient: &ColorGradient,
+) -> (f32, f32, f32) {
     if num_channels == 0 {
         return (0.0, 0.0, 0.0);
     }
@@ -203,7 +263,11 @@ fn channels_to_rgb_flat(cell_data: &[f32], idx: usize, num_channels: usize, grad
     }
     if num_channels == 2 {
         let color = gradient.lerp(cell_data[base]);
-        return (color.red * cell_data[base], color.green * cell_data[base + 1], color.blue * 0.5);
+        return (
+            color.red * cell_data[base],
+            color.green * cell_data[base + 1],
+            color.blue * 0.5,
+        );
     }
     let color = gradient.lerp(cell_data[base]);
     (color.red, color.green, color.blue)
@@ -221,10 +285,19 @@ pub fn update_instance_data(
     let Ok(mut instance_data) = query.single_mut() else {
         return;
     };
-    let smooth = if grid.grid_coloration.smooth { 1.0 } else { 0.0 };
+    let smooth = if grid.grid_coloration.smooth {
+        1.0
+    } else {
+        0.0
+    };
     let num_channels = grid.rule.num_channels;
     for (i, inst) in instance_data.0.iter_mut().enumerate() {
-        let (r, g, b) = channels_to_rgb_flat(&grid.cell_data, i, num_channels, &grid.grid_coloration.gradient);
+        let (r, g, b) = channels_to_rgb_flat(
+            &grid.cell_data,
+            i,
+            num_channels,
+            &grid.grid_coloration.gradient,
+        );
         inst.r = r;
         inst.g = g;
         inst.b = b;
@@ -242,12 +315,21 @@ pub fn update_instance_data(
 }
 
 fn catmull_rom(t: f32, p0: f32, p1: f32, p2: f32, p3: f32) -> f32 {
-    0.5 * (2.0 * p1 + (-p0 + p2) * t
+    0.5 * (2.0 * p1
+        + (-p0 + p2) * t
         + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
         + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t)
 }
 
-fn sample_bicubic(cell_data: &[f32], w: usize, h: usize, ch: usize, num_ch: usize, gx: f32, gy: f32) -> f32 {
+fn sample_bicubic(
+    cell_data: &[f32],
+    w: usize,
+    h: usize,
+    ch: usize,
+    num_ch: usize,
+    gx: f32,
+    gy: f32,
+) -> f32 {
     let ix = gx.floor() as i32;
     let iy = gy.floor() as i32;
     let fx = gx - ix as f32;
@@ -274,7 +356,15 @@ pub fn update_cell_textures(
     mut sprite_query: Query<(&mut Sprite, &mut Visibility), With<HeatmapSprite>>,
 ) {
     let Some(grid) = grid else { return };
-    let Ok((mut sprite, mut visibility)) = sprite_query.single_mut() else { return };
+    let Ok((mut sprite, mut visibility)) = sprite_query.single_mut() else {
+        return;
+    };
+
+    // The bicubic resample is expensive; only run it when the smooth view is active.
+    if !grid.grid_coloration.smooth {
+        *visibility = Visibility::Hidden;
+        return;
+    }
 
     let max_tex = 800u32;
     let tex_w = ((grid.width as f32 * grid.cell_size).ceil() as u32).min(max_tex);
@@ -286,7 +376,11 @@ pub fn update_cell_textures(
     });
     if needs_resize {
         let new_image = Image::new(
-            Extent3d { width: tex_w, height: tex_h, depth_or_array_layers: 1 },
+            Extent3d {
+                width: tex_w,
+                height: tex_h,
+                depth_or_array_layers: 1,
+            },
             TextureDimension::D2,
             vec![0u8; tex_size],
             TextureFormat::Rgba8Unorm,
@@ -295,7 +389,9 @@ pub fn update_cell_textures(
         let _ = images.insert(&heatmap_tex.0, new_image);
     }
 
-    let Some(image) = images.get_mut(&heatmap_tex.0) else { return };
+    let Some(image) = images.get_mut(&heatmap_tex.0) else {
+        return;
+    };
     let num_channels = grid.rule.num_channels;
     let gradient = &grid.grid_coloration.gradient;
     let w_f = (grid.width - 1).max(1) as f32;
@@ -309,9 +405,36 @@ pub fn update_cell_textures(
                 for px in 0..tex_w {
                     let gx = px as f32 / tw_f * w_f;
                     let gy = h_f - py as f32 / th_f * h_f;
-                    let r = sample_bicubic(&grid.cell_data, grid.width, grid.height, 0, num_channels, gx, gy).clamp(0.0, 1.0);
-                    let g = sample_bicubic(&grid.cell_data, grid.width, grid.height, 1, num_channels, gx, gy).clamp(0.0, 1.0);
-                    let b = sample_bicubic(&grid.cell_data, grid.width, grid.height, 2, num_channels, gx, gy).clamp(0.0, 1.0);
+                    let r = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        0,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
+                    let g = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        1,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
+                    let b = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        2,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
                     let off = (py * tex_w + px) as usize * 4;
                     data[off] = (r * 255.0) as u8;
                     data[off + 1] = (g * 255.0) as u8;
@@ -324,8 +447,26 @@ pub fn update_cell_textures(
                 for px in 0..tex_w {
                     let gx = px as f32 / tw_f * w_f;
                     let gy = h_f - py as f32 / th_f * h_f;
-                    let v0 = sample_bicubic(&grid.cell_data, grid.width, grid.height, 0, num_channels, gx, gy).clamp(0.0, 1.0);
-                    let v1 = sample_bicubic(&grid.cell_data, grid.width, grid.height, 1, num_channels, gx, gy).clamp(0.0, 1.0);
+                    let v0 = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        0,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
+                    let v1 = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        1,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
                     let color = gradient.lerp(v0);
                     let off = (py * tex_w + px) as usize * 4;
                     data[off] = ((color.red * v0).clamp(0.0, 1.0) * 255.0) as u8;
@@ -339,7 +480,16 @@ pub fn update_cell_textures(
                 for px in 0..tex_w {
                     let gx = px as f32 / tw_f * w_f;
                     let gy = h_f - py as f32 / th_f * h_f;
-                    let v = sample_bicubic(&grid.cell_data, grid.width, grid.height, 0, num_channels, gx, gy).clamp(0.0, 1.0);
+                    let v = sample_bicubic(
+                        &grid.cell_data,
+                        grid.width,
+                        grid.height,
+                        0,
+                        num_channels,
+                        gx,
+                        gy,
+                    )
+                    .clamp(0.0, 1.0);
                     let color = gradient.lerp(v);
                     let off = (py * tex_w + px) as usize * 4;
                     data[off] = (color.red * 255.0) as u8;
@@ -371,18 +521,19 @@ pub fn rebuild_grid_instances(
     mut query: Query<(&mut CellInstanceData, &mut GradientIndex), With<CellGrid>>,
     mut smooth_query: Query<&mut SmoothMode, With<CellGrid>>,
     windows: Query<&Window>,
+    metrics: Res<UiMetrics>,
 ) {
     let window = windows.single().unwrap();
-    let visible_width = window.resolution.width() - PANEL_WIDTH;
-    let visible_height = window.resolution.height() - TOPBAR_HEIGHT;
+    let visible_width = window.resolution.width() - metrics.panel_width;
+    let visible_height = window.resolution.height() - metrics.topbar_height - metrics.status_height;
 
     let width = ((visible_width / grid.cell_size).ceil() as usize).max(1);
     let height = ((visible_height / grid.cell_size).ceil() as usize).max(1);
 
-    let slider_changed = grid.needs_rebuild();
-    if !slider_changed && grid.width == width && grid.height == height {
+    if grid.width == width && grid.height == height && !grid.needs_rebuild() {
         return;
     }
+
     let Ok((mut instance_data, mut gradient_idx)) = query.single_mut() else {
         return;
     };
@@ -392,51 +543,32 @@ pub fn rebuild_grid_instances(
 
     let num_channels = grid.rule.num_channels;
     let total_cells = width * height;
-    let old_width = grid.width;
-    let old_height = grid.height;
-    grid.width = width;
-    grid.height = height;
-    grid.prev_cell_size = grid.cell_size;
-
-    if slider_changed {
-        let old_cell_data = std::mem::take(&mut grid.cell_data);
-        grid.cell_data.resize(total_cells * num_channels, 0.0);
-        grid.next_cell_data.resize(total_cells * num_channels, 0.0);
-        if !old_cell_data.is_empty() {
-            for y in 0..old_height.min(height) {
-                for x in 0..old_width.min(width) {
-                    let old_idx = (y * old_width + x) * num_channels;
-                    let new_idx = (y * width + x) * num_channels;
-                    for c in 0..num_channels {
-                        if old_idx + c < old_cell_data.len() {
-                            grid.cell_data[new_idx + c] = old_cell_data[old_idx + c];
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        grid.cell_data.resize(total_cells * num_channels, 0.0);
-        grid.next_cell_data.resize(total_cells * num_channels, 0.0);
-        grid.init();
-    }
+    let cell_size = grid.cell_size;
+    grid.resize_preserving(width, height, cell_size);
 
     let instances: Vec<CellInstance> = (0..total_cells)
         .map(|i| {
-            let x = (i % width) as f32 * grid.cell_size
-                - (width as f32 * grid.cell_size) / 2.0
+            let x = (i % width) as f32 * grid.cell_size - (width as f32 * grid.cell_size) / 2.0
                 + grid.cell_size / 2.0;
-            let y = (i / width) as f32 * grid.cell_size
-                - (height as f32 * grid.cell_size) / 2.0
+            let y = (i / width) as f32 * grid.cell_size - (height as f32 * grid.cell_size) / 2.0
                 + grid.cell_size / 2.0;
-            let (r, g, b) = channels_to_rgb_flat(&grid.cell_data, i, num_channels, &grid.grid_coloration.gradient);
+            let (r, g, b) = channels_to_rgb_flat(
+                &grid.cell_data,
+                i,
+                num_channels,
+                &grid.grid_coloration.gradient,
+            );
             CellInstance {
                 position: Vec2::new(x, y),
                 cell_size: grid.cell_size,
                 r,
                 g,
                 b,
-                smooth: if grid.grid_coloration.smooth { 1.0 } else { 0.0 },
+                smooth: if grid.grid_coloration.smooth {
+                    1.0
+                } else {
+                    0.0
+                },
             }
         })
         .collect();
@@ -570,7 +702,12 @@ fn queue_cells(
             let key =
                 view_key | Mesh2dPipelineKey::from_primitive_topology(mesh.primitive_topology());
             let pipeline_id = pipelines
-                .specialize(&pipeline_cache, &pipeline, (key, gradient_idx), &mesh.layout)
+                .specialize(
+                    &pipeline_cache,
+                    &pipeline,
+                    (key, gradient_idx),
+                    &mesh.layout,
+                )
                 .unwrap();
             phase.add(Transparent2d {
                 entity: (entity, *main_entity),
@@ -653,5 +790,3 @@ impl<P: PhaseItem> RenderCommand<P> for DrawCellsInstanced {
         RenderCommandResult::Success
     }
 }
-
-

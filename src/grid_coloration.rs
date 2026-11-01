@@ -70,7 +70,12 @@ impl ColorGradient {
     }
 
     pub fn all() -> Vec<Self> {
-        vec![Self::viridis(), Self::plasma(), Self::inferno(), Self::cividis()]
+        vec![
+            Self::viridis(),
+            Self::plasma(),
+            Self::inferno(),
+            Self::cividis(),
+        ]
     }
 
     pub fn lerp(&self, x: f32) -> LinearRgba {

@@ -4,17 +4,17 @@ use bevy_embedded_assets::{EmbeddedAssetPlugin, PluginMode};
 use crate::grid::update_generation;
 use crate::instancing::CellMaterialPlugin;
 use crate::instancing::update_instance_data;
-use crate::interface::{PANEL_WIDTH, TOPBAR_HEIGHT, UiPlugin};
 use crate::shapes::insert_shapes;
 use crate::shapes::load_shapes;
-use bevy_egui::EguiPlugin;
+use crate::ui::{UiMetrics, UiPlugin};
+use bevy_egui::{EguiContexts, EguiPlugin};
 
 mod grid;
 mod grid_coloration;
 mod instancing;
-mod interface;
 mod rule;
 mod shapes;
+mod ui;
 
 const DRAW_STRENGTH: f32 = 0.05;
 
@@ -25,6 +25,7 @@ fn main() {
         })
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
+                title: "LifeView".to_string(),
                 fit_canvas_to_parent: true,
                 canvas: Some("#bevy".to_string()),
                 ..default()
@@ -52,6 +53,8 @@ fn mouse_click(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     grid: Option<ResMut<grid::Grid>>,
+    metrics: Res<UiMetrics>,
+    mut contexts: EguiContexts,
 ) {
     let Some(grid) = grid else {
         return;
@@ -59,23 +62,40 @@ fn mouse_click(
     let Ok(window) = windows.single() else {
         return;
     };
+    if contexts
+        .ctx_mut()
+        .map(|ctx| ctx.wants_pointer_input())
+        .unwrap_or(false)
+    {
+        return;
+    }
     if mouse.pressed(MouseButton::Left) {
         if let Some(position) = window.cursor_position() {
-            draw(position, grid, 1.0, window);
+            draw(position, grid, 1.0, window, &metrics);
         }
     } else if mouse.pressed(MouseButton::Right) {
         if let Some(position) = window.cursor_position() {
-            draw(position, grid, -1.0, window);
+            draw(position, grid, -1.0, window, &metrics);
         }
     }
 }
 
-fn draw(position: Vec2, mut grid: ResMut<grid::Grid>, pressure: f32, window: &Window) {
-    if position.x < PANEL_WIDTH || position.y < TOPBAR_HEIGHT {
+fn draw(
+    position: Vec2,
+    mut grid: ResMut<grid::Grid>,
+    pressure: f32,
+    window: &Window,
+    metrics: &UiMetrics,
+) {
+    if position.x < metrics.panel_width
+        || position.y < metrics.topbar_height
+        || position.y > window.height() - metrics.status_height
+    {
         return;
     }
-    let gx = ((position.x - PANEL_WIDTH) / grid.cell_size).floor() as i32;
-    let gy = ((window.height() - position.y) / grid.cell_size).floor() as i32;
+    let gx = ((position.x - metrics.panel_width) / grid.cell_size).floor() as i32;
+    let grid_height = grid.height as f32 * grid.cell_size;
+    let gy = ((metrics.topbar_height + grid_height - position.y) / grid.cell_size).floor() as i32;
     let true_pos = grid.wrap_pos(IVec2::new(gx, gy));
     let idx: usize = grid.vector_to_idx(true_pos) as usize;
     let num_channels = grid.rule.num_channels;

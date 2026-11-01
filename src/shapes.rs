@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::Path;
 
 use bevy::{
     ecs::system::{Commands, ResMut},
     math::IVec2,
 };
+use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 
 use crate::rule::Rule;
+
+static SHAPES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/shapes");
 
 #[derive(Clone, Debug)]
 pub struct Shape {
@@ -31,27 +32,27 @@ struct ShapeJson {
 }
 
 const GENUS_DISPLAY_NAMES: &[(&str, &str)] = &[
-    ("Orbium", "Orbium (球形目)"),
-    ("Gyrorbium", "Gyrorbium (旋球目)"),
-    ("Vagorbium", "Vagorbium (游球目)"),
-    ("Synorbium", "Synorbium (联球目)"),
-    ("Trisynorbium", "Trisynorbium (三联球目)"),
-    ("Parorbium", "Parorbium (并球目)"),
-    ("Triparorbium", "Triparorbium (三并球目)"),
-    ("Scutium", "Scutium (盾形目)"),
-    ("Discutium", "Discutium (盘盾目)"),
-    ("Triscutium", "Triscutium (三盾目)"),
-    ("Hydrogeminium", "Hydrogeminium (水双生目)"),
-    ("Tessellatium", "Tessellatium (镶嵌目)"),
-    ("Flos", "Flos (花形目)"),
-    ("Asteria", "Asteria (星形目)"),
-    ("Spirillum", "Spirillum (螺旋目)"),
-    ("Angula", "Angula (角形目)"),
-    ("Caterpillar", "Caterpillar (毛虫目)"),
-    ("Platyhelminthes", "Platyhelminthes (扁虫目)"),
-    ("Lacuna", "Lacuna (环空目)"),
-    ("Medusa", "Medusa (水母目)"),
-    ("Anemone", "Anemone (海葵目)"),
+    ("Orbium", "Orbium"),
+    ("Gyrorbium", "Gyrorbium"),
+    ("Vagorbium", "Vagorbium"),
+    ("Synorbium", "Synorbium"),
+    ("Trisynorbium", "Trisynorbium"),
+    ("Parorbium", "Parorbium"),
+    ("Triparorbium", "Triparorbium"),
+    ("Scutium", "Scutium"),
+    ("Discutium", "Discutium"),
+    ("Triscutium", "Triscutium"),
+    ("Hydrogeminium", "Hydrogeminium"),
+    ("Tessellatium", "Tessellatium"),
+    ("Flos", "Flos"),
+    ("Asteria", "Asteria"),
+    ("Spirillum", "Spirillum"),
+    ("Angula", "Angula"),
+    ("Caterpillar", "Caterpillar"),
+    ("Platyhelminthes", "Platyhelminthes"),
+    ("Lacuna", "Lacuna"),
+    ("Medusa", "Medusa"),
+    ("Anemone", "Anemone"),
     ("StillLife", "Still Life"),
     ("Oscillator", "Oscillator"),
     ("Spaceship", "Spaceship"),
@@ -94,6 +95,7 @@ impl Shape {
         }
     }
 
+    #[allow(dead_code)]
     pub fn ring(
         name: impl Into<String>,
         optimal_rule: Rule,
@@ -115,7 +117,13 @@ impl Shape {
                 }
             }
         }
-        Self::new(name.into(), optimal_rule, cells_state, cells_pos, cells_channel)
+        Self::new(
+            name.into(),
+            optimal_rule,
+            cells_state,
+            cells_pos,
+            cells_channel,
+        )
     }
 
     pub fn merge_channel(mut self, other: Self) -> Self {
@@ -146,7 +154,13 @@ impl Shape {
                 }
             }
         }
-        Self::new(name.into(), optimal_rule, cells_state, cells_pos, cells_channel)
+        Self::new(
+            name.into(),
+            optimal_rule,
+            cells_state,
+            cells_pos,
+            cells_channel,
+        )
     }
 
     pub fn from_json(json_str: &str) -> Result<Self, String> {
@@ -168,12 +182,7 @@ impl Shape {
 
         for (ch_idx, channel_grid) in parsed.channels.iter().enumerate() {
             let refs: Vec<&[f32]> = channel_grid.iter().map(|row| row.as_slice()).collect();
-            let channel_shape = Self::from_channel_grid(
-                "",
-                rule.clone(),
-                ch_idx,
-                &refs,
-            );
+            let channel_shape = Self::from_channel_grid("", rule.clone(), ch_idx, &refs);
             shape = shape.merge_channel(channel_shape);
         }
 
@@ -189,12 +198,11 @@ impl Shapes {
         self.0.push(shape);
     }
 
+    #[allow(dead_code)]
     pub fn by_genus(&self) -> BTreeMap<String, Vec<&Shape>> {
         let mut map: BTreeMap<String, Vec<&Shape>> = BTreeMap::new();
         for shape in &self.0 {
-            map.entry(shape.genus.clone())
-                .or_default()
-                .push(shape);
+            map.entry(shape.genus.clone()).or_default().push(shape);
         }
         map
     }
@@ -212,100 +220,53 @@ impl Shapes {
     }
 
     pub fn genus_display(&self, genus: &str) -> String {
-        self.0.iter()
+        self.0
+            .iter()
             .find(|s| s.genus == genus)
             .map(|s| s.genus_display.clone())
             .unwrap_or_else(|| genus.to_string())
     }
 
-    pub fn load_from_dir(dir_path: impl AsRef<Path>, category: &str) -> Self {
+    /// Load every shape embedded at compile time.
+    ///
+    /// Using `include_dir` instead of `std::fs` keeps the shape browser working on
+    /// WASM, where the filesystem is unavailable.
+    pub fn load_embedded() -> Self {
         let mut shapes = Shapes::default();
-        let dir = dir_path.as_ref();
 
-        if !dir.exists() {
-            eprintln!("Shapes directory not found: {:?}", dir);
-            return shapes;
-        }
+        for dir in SHAPES_DIR.dirs() {
+            let category = dir
+                .path()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Uncategorized");
 
-        let entries = match fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Failed to read shapes directory: {}", e);
-                return shapes;
-            }
-        };
+            let mut files: Vec<_> = dir.files().collect();
+            files.sort_by_key(|file| file.path());
 
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("Failed to read directory entry: {}", e);
+            for file in files {
+                if file.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
                     continue;
                 }
-            };
 
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-
-            let content = match fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to read {:?}: {}", path, e);
+                let Some(content) = file.contents_utf8() else {
+                    eprintln!("Shape file is not valid UTF-8: {:?}", file.path());
                     continue;
-                }
-            };
+                };
 
-            match Shape::from_json(&content) {
-                Ok(mut shape) => {
-                    shape.category = category.to_string();
-                    eprintln!("Loaded shape: {} (category: {})", shape.name, category);
-                    shapes.add(shape);
-                }
-                Err(e) => {
-                    eprintln!("Failed to parse {:?}: {}", path, e);
+                match Shape::from_json(content) {
+                    Ok(mut shape) => {
+                        shape.category = category.to_string();
+                        shapes.add(shape);
+                    }
+                    Err(error) => {
+                        eprintln!("Failed to parse {:?}: {}", file.path(), error);
+                    }
                 }
             }
         }
 
-        shapes
-    }
-
-    pub fn load_all(base_path: impl AsRef<Path>) -> Self {
-        let mut shapes = Shapes::default();
-        let base = base_path.as_ref();
-
-        let entries = match fs::read_dir(base) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Failed to read base shapes directory: {}", e);
-                return shapes;
-            }
-        };
-
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("Failed to read directory entry: {}", e);
-                    continue;
-                }
-            };
-
-            let path = entry.path();
-            if path.is_dir() {
-                let category = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                eprintln!("Loading shapes from category: {}", category);
-                let dir_shapes = Self::load_from_dir(&path, &category);
-                shapes.0.extend(dir_shapes.0);
-            }
-        }
-
+        eprintln!("Loaded {} shapes from embedded assets", shapes.0.len());
         shapes
     }
 }
@@ -315,6 +276,19 @@ pub fn insert_shapes(mut commands: Commands) {
 }
 
 pub fn load_shapes(mut shapes: ResMut<Shapes>) {
-    let loaded = Shapes::load_all("assets/shapes");
-    shapes.0 = loaded.0;
+    shapes.0 = Shapes::load_embedded().0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_shapes_load() {
+        let shapes = Shapes::load_embedded();
+
+        assert!(shapes.0.len() >= 60, "expected the bundled shape library");
+        assert!(shapes.0.iter().any(|shape| shape.category == "Conway"));
+        assert!(shapes.0.iter().any(|shape| shape.category == "Lenia"));
+    }
 }
