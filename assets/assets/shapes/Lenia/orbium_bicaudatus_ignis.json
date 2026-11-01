@@ -6,8 +6,8 @@
     "num_channels": 1,
     "kernels": [
       {
-        "mu": 0.1,
-        "sigma": 0.008,
+        "mu": 0.105,
+        "sigma": 0.009,
         "base_radius": 13,
         "relative_radius": 1.0,
         "height": 1.0,
